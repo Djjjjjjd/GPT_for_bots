@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -51,7 +52,7 @@ async def extract_text(
 
 
 async def extract_image_text(path: Path, vision_ocr: VisionOcr) -> str:
-    local_text = await asyncio.to_thread(_tesseract_image_to_string, path)
+    local_text = await _try_tesseract_image(path)
     if _has_enough_text(local_text):
         return local_text.strip()
 
@@ -106,7 +107,7 @@ async def _ocr_pdf_pages(path: Path, *, max_pdf_pages: int, vision_ocr: VisionOc
             image_path = Path(temp_dir) / f"page-{index}.png"
             image.save(image_path, "PNG")
 
-            local_text = await asyncio.to_thread(pytesseract.image_to_string, image)
+            local_text = await _try_tesseract_pil_image(image)
             if _has_enough_text(local_text):
                 page_texts.append(local_text.strip())
                 continue
@@ -125,6 +126,22 @@ async def _ocr_pdf_pages(path: Path, *, max_pdf_pages: int, vision_ocr: VisionOc
 def _tesseract_image_to_string(path: Path) -> str:
     with Image.open(path) as image:
         return pytesseract.image_to_string(image)
+
+
+async def _try_tesseract_image(path: Path) -> str:
+    try:
+        return await asyncio.to_thread(_tesseract_image_to_string, path)
+    except Exception:
+        logging.exception("Local image OCR failed, falling back to OpenAI vision")
+        return ""
+
+
+async def _try_tesseract_pil_image(image: Image.Image) -> str:
+    try:
+        return await asyncio.to_thread(pytesseract.image_to_string, image)
+    except Exception:
+        logging.exception("Local PDF page OCR failed, falling back to OpenAI vision")
+        return ""
 
 
 def _has_enough_text(text: str) -> bool:
