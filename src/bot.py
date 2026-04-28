@@ -122,9 +122,39 @@ async def handle_file(message: Message) -> None:
             downloaded_file.cleanup()
 
 
+@dp.message(F.text)
+async def handle_text_question(message: Message) -> None:
+    if message.from_user is None:
+        await message.answer("Не удалось определить пользователя.")
+        return
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Напишите вопрос или отправьте фото, PDF или DOCX.")
+        return
+
+    limit_result = rate_limiter.check_and_increment(message.from_user.id)
+    if not limit_result.allowed:
+        await message.answer(limit_result.message or "Лимит запросов исчерпан.")
+        return
+
+    status_message = await message.answer("Готовлю ответ...")
+
+    try:
+        answer = await gpt_client.answer_task(text)
+        await status_message.delete()
+        await send_long_message(message, answer)
+    except Exception:
+        logging.exception("Failed to answer text question")
+        await status_message.edit_text(
+            "Не получилось подготовить ответ. Попробуйте повторить позже."
+        )
+
+
 @dp.message()
 async def handle_other(message: Message) -> None:
-    await message.answer("Отправьте фото, PDF или DOCX с заданием.")
+    await message.answer("Напишите вопрос или отправьте фото, PDF или DOCX с заданием.")
+
 
 
 def _get_incoming_file(message: Message) -> IncomingFile | None:
