@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: gpt-for-bots
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.bot
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: MAX_FILE_MB
+        value: 15
+      - key: MAX_PDF_PAGES
+        value: 10
+      - key: USER_DAILY_LIMIT
+        value: 20
+      - key: USER_MIN_SECONDS_BETWEEN_REQUESTS
+        value: 10
