@@ -11,6 +11,8 @@ Rules:
 - If OCR quality is too poor to understand the task, say that the file is unreadable and ask
   the user to send a clearer image or PDF.
 - Do not invent missing facts from unreadable text.
+- Return plain text only. Do not use Markdown, HTML, headings, bold/italic markers,
+  code blocks, tables, or decorative formatting.
 """.strip()
 
 

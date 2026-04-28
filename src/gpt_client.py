@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -22,7 +23,7 @@ class GptClient:
                 f"{extracted_text.strip()}"
             ),
         )
-        return response.output_text.strip()
+        return strip_markdown(response.output_text)
 
     async def extract_text_from_image(self, image_path: Path) -> str:
         image_bytes = image_path.read_bytes()
@@ -54,3 +55,17 @@ def _guess_image_mime_type(path: Path) -> str:
     if suffix == ".webp":
         return "image/webp"
     return "image/png"
+
+
+def strip_markdown(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"```(?:\w+)?\n?(.*?)```", r"\1", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"(\*\*|__)(.*?)\1", r"\2", cleaned)
+    cleaned = re.sub(r"(\*|_)(.*?)\1", r"\2", cleaned)
+    cleaned = re.sub(r"^\s{0,3}>\s?", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*[-*+]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*\d+\.\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()

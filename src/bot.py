@@ -43,7 +43,7 @@ rate_limiter = InMemoryRateLimiter(
 @dp.message(Command("start", "help"))
 async def handle_start(message: Message) -> None:
     await message.answer(
-        "Отправьте фото, PDF или DOCX с заданием. "
+        "Напишите вопрос текстом или отправьте фото, PDF или DOCX с заданием. "
         "Я распознаю текст, определю тип задания и верну ответ."
     )
 
