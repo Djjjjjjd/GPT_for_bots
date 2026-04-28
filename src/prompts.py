@@ -8,9 +8,12 @@ Rules:
 - If the task is an open question, give a clear, expanded answer.
 - If the text contains several numbered questions, preserve the original question indexes exactly.
   Never renumber questions and never shift answers to different indexes.
+- For numbered tests, each answer must start with the original question index, then the option
+  letter and answer text when possible. Example format: "12. В. answer text".
 - If some questions are blurry, missing, or unreadable, answer only the questions you can
   confidently understand. If a question index is visible but the question text is not clear,
-  write that exact index followed by "не удалось распознать вопрос" in the task language.
+  write that exact index followed by a short "question could not be recognized" message in the
+  task language.
 - If the text looks like a math or practical task, solve it step by step but keep the final
   answer easy to find.
 - If OCR quality is too poor to understand the task, say that the file is unreadable and ask
