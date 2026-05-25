@@ -25,6 +25,20 @@ class GptClient:
         )
         return strip_markdown(response.output_text)
 
+    async def answer_task_with_image(self, image_path: Path) -> str:
+        """Send a single image directly to GPT Vision and get the task answer."""
+        return await self.answer_task_with_images([image_path])
+
+    async def answer_task_with_images(self, image_paths: list[Path]) -> str:
+        """Send multiple images (e.g. scanned PDF pages) to GPT Vision and get the task answer."""
+        content = _build_image_content(image_paths)
+        response = await self._client.responses.create(
+            model=self._model,
+            instructions=SYSTEM_PROMPT,
+            input=[{"role": "user", "content": content}],
+        )
+        return strip_markdown(response.output_text)
+
     async def extract_text_from_image(self, image_path: Path) -> str:
         image_bytes = image_path.read_bytes()
         encoded = base64.b64encode(image_bytes).decode("ascii")
@@ -46,6 +60,19 @@ class GptClient:
             ],
         )
         return response.output_text.strip()
+
+
+def _build_image_content(image_paths: list[Path]) -> list[dict]:
+    content = []
+    for image_path in image_paths:
+        image_bytes = image_path.read_bytes()
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        mime_type = _guess_image_mime_type(image_path)
+        content.append({
+            "type": "input_image",
+            "image_url": f"data:{mime_type};base64,{encoded}",
+        })
+    return content
 
 
 def _guess_image_mime_type(path: Path) -> str:

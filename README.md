@@ -1,41 +1,113 @@
 # GPT for Telegram Tasks
 
-Telegram-бот принимает фото, PDF или DOCX с заданием, извлекает текст, отправляет его в OpenAI и возвращает ответ пользователю.
+Telegram-бот, который принимает учебные задания в виде текста, фото, PDF или DOCX, извлекает из них текст и возвращает готовый ответ через OpenAI GPT.
 
-## Pipeline
+## Как это работает
 
-```text
-Telegram -> file -> download -> limits -> parse/OCR -> extracted text -> GPT -> answer
+```
+Пользователь → Telegram → бот
+                            ↓
+                     Проверка лимитов
+                            ↓
+                  Скачивание файла (если есть)
+                            ↓
+               Извлечение текста (OCR / pypdf / docx)
+                            ↓
+                   OpenAI (ответ на задание)
+                            ↓
+                  Пользователь получает ответ
 ```
 
-## Возможности
+## Функционал
 
-- Фото: локальный OCR через Tesseract, затем OpenAI vision fallback.
-- PDF: сначала текстовый слой через `pypdf`, затем OCR страниц в пределах лимита.
-- DOCX: чтение абзацев через `python-docx`.
-- Защита бюджета:
-  - лимит размера файла;
-  - лимит страниц PDF;
-  - дневной лимит запросов на пользователя;
-  - минимальная пауза между запросами пользователя.
+### Поддерживаемые форматы входных данных
+
+| Формат | Как обрабатывается |
+|---|---|
+| Текст | Передаётся напрямую в GPT |
+| Фото (JPEG, PNG, WebP) | Tesseract OCR → если мало текста, OpenAI Vision |
+| PDF | Текстовый слой (pypdf) → если пустой, постраничный OCR (Tesseract → OpenAI Vision) |
+| DOCX | Извлечение абзацев через python-docx |
+| DOC | Не поддерживается (просьба прислать DOCX или PDF) |
+
+### Интеллект OCR (двухуровневый фоллбэк)
+
+Для изображений и сканированных PDF бот сначала пробует **локальный Tesseract** (бесплатно, без API). Если распознанного текста меньше 20 буквенно-цифровых символов — переключается на **OpenAI Vision** (платный, но точный). Это снижает расход API при хорошем качестве изображений.
+
+### Ответы на задания
+
+Системный промпт настроен для учебных заданий:
+
+- **Тесты и множественный выбор** — короткий ответ: номер вопроса + буква варианта + текст. Пример: `12. В. Правильный ответ`.
+- **Открытые вопросы** — развёрнутый ответ на языке задания.
+- **Математика / практические задачи** — пошаговое решение с выделением итогового ответа.
+- **Несколько вопросов в одном файле** — все ответы с сохранением оригинальной нумерации (бот не переставляет и не перенумеровывает вопросы).
+- **Нечитаемые вопросы** — если индекс виден, но текст размыт, бот указывает индекс и сообщает, что вопрос не распознан.
+- **Ответы в plain text** — никакого Markdown, HTML и форматирования. Telegram выводит текст как есть.
+
+### Rate limiting (защита от злоупотреблений)
+
+- Дневной лимит запросов на пользователя (по умолчанию 20).
+- Минимальная пауза между запросами (по умолчанию 10 секунд).
+- Лимит размера файла (по умолчанию 15 МБ) — проверяется дважды: по метаданным Telegram и после скачивания.
+- Лимит страниц PDF (по умолчанию 10 стр.) — проверяется до OCR.
+- Лимиты хранятся в памяти процесса. После перезапуска счётчики сбрасываются.
+
+### Длинные ответы
+
+Telegram ограничивает сообщение 4096 символами. Бот автоматически разбивает длинные ответы GPT на чанки по 3900 символов и отправляет их последовательно.
+
+### Прокси-поддержка
+
+Если Telegram API недоступен напрямую (страна, firewall, корпоративная сеть), можно задать HTTP или SOCKS5 прокси через переменную `TELEGRAM_PROXY_URL`.
+
+## Команды бота
+
+| Команда | Описание |
+|---|---|
+| `/start` | Приветствие и инструкция |
+| `/help` | То же, что `/start` |
+| Любой текст | Ответ на текстовый вопрос |
+| Фото / документ | Извлечение текста + ответ |
+
+## Структура проекта
+
+```
+src/
+  bot.py            — точка входа, обработчики Telegram
+  config.py         — настройки через pydantic-settings (.env)
+  file_loader.py    — скачивание файлов из Telegram во временную папку
+  text_extractors.py — OCR, извлечение текста из PDF и DOCX
+  gpt_client.py     — обёртка над OpenAI Responses API + strip_markdown
+  prompts.py        — системный промпт и промпт для Vision OCR
+  rate_limit.py     — in-memory rate limiter по user_id
+```
 
 ## Локальный запуск
 
-1. Создайте виртуальное окружение и установите зависимости:
+### Требования
+
+- Python 3.11+
+- Tesseract OCR (`tesseract-ocr`) — для локального OCR изображений
+- Poppler (`poppler-utils`) — для конвертации страниц PDF в PNG
+
+На Windows установите [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) и [Poppler](https://github.com/oschwartz10612/poppler-windows/releases) и добавьте их в `PATH`.
+
+Если системные OCR-пакеты недоступны, бот всё равно работает: извлечение текста из изображений и сканов переключится на OpenAI Vision.
+
+### Установка и запуск
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
+
+copy .env.example .env        # Windows
+# cp .env.example .env        # Linux/macOS
 ```
 
-2. Создайте `.env` по примеру:
-
-```bash
-copy .env.example .env
-```
-
-3. Заполните переменные:
+Заполните `.env`:
 
 ```text
 TELEGRAM_BOT_TOKEN=...
@@ -43,7 +115,7 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-4. Запустите бота:
+Запустите:
 
 ```bash
 python -m src.bot
@@ -51,67 +123,56 @@ python -m src.bot
 
 ## Переменные окружения
 
-| Variable | Default in `.env.example` | Description |
-| --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | required | Токен бота из BotFather |
-| `TELEGRAM_PROXY_URL` | empty | Опциональный HTTP/SOCKS proxy для доступа к Telegram API |
-| `OPENAI_API_KEY` | required | API key OpenAI |
-| `OPENAI_MODEL` | `gpt-4.1-mini` | Модель OpenAI для OCR fallback и ответов |
-| `MAX_FILE_MB` | `15` | Максимальный размер файла |
-| `MAX_PDF_PAGES` | `10` | Максимум страниц PDF |
-| `USER_DAILY_LIMIT` | `20` | Запросов в день на пользователя |
-| `USER_MIN_SECONDS_BETWEEN_REQUESTS` | `10` | Пауза между запросами |
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | обязательно | Токен бота из @BotFather |
+| `TELEGRAM_PROXY_URL` | пусто | HTTP или SOCKS5 прокси для доступа к Telegram API |
+| `OPENAI_API_KEY` | обязательно | API-ключ OpenAI |
+| `OPENAI_MODEL` | `gpt-4.1-mini` | Модель OpenAI (используется и для ответов, и для Vision OCR) |
+| `MAX_FILE_MB` | `15` | Максимальный размер принимаемого файла в МБ |
+| `MAX_PDF_PAGES` | `10` | Максимальное число страниц PDF для обработки |
+| `USER_DAILY_LIMIT` | `20` | Максимум запросов в сутки на одного пользователя |
+| `USER_MIN_SECONDS_BETWEEN_REQUESTS` | `10` | Минимальная пауза между запросами одного пользователя (сек) |
 
-## Render deploy
-
-Репозиторий содержит `render.yaml`.
-
-Render service:
-
-- Type: `worker`
-- Build command: `pip install -r requirements.txt`
-- Start command: `python -m src.bot`
-
-В Render Dashboard добавьте секреты:
-
-- `TELEGRAM_BOT_TOKEN`
-- `OPENAI_API_KEY`
-
-`OPENAI_MODEL=gpt-4.1-mini` уже прописан в `render.yaml`, но его можно поменять через env.
-
-## Ошибка подключения к Telegram API
-
-Если локально видите ошибку вроде `Cannot connect to host api.telegram.org:443`, значит процесс не может достучаться до Telegram API. Проверьте:
-
-- работает ли интернет/VPN;
-- открывается ли `https://api.telegram.org` из этой же сети;
-- не блокирует ли соединение firewall/antivirus;
-- нужен ли proxy.
-
-Для локального proxy добавьте в `.env`:
+### Прокси
 
 ```text
+# HTTP
 TELEGRAM_PROXY_URL=http://127.0.0.1:7890
+
+# SOCKS5
+TELEGRAM_PROXY_URL=socks5://user:pass@127.0.0.1:1080
 ```
 
-или SOCKS:
+## Деплой на Render
 
-```text
-TELEGRAM_PROXY_URL=socks5://127.0.0.1:1080
-```
+Репозиторий содержит готовый [`render.yaml`](render.yaml) для деплоя как Worker-сервис.
 
-## OCR system packages
+1. Подключите репозиторий в [Render Dashboard](https://dashboard.render.com).
+2. Добавьте секреты в Environment Variables:
+   - `TELEGRAM_BOT_TOKEN`
+   - `OPENAI_API_KEY`
+3. `OPENAI_MODEL` и лимиты уже прописаны в `render.yaml` со значениями по умолчанию — при необходимости переопределите через env.
 
-Для локального OCR нужны системные зависимости:
+Render автоматически выполнит `pip install -r requirements.txt` и запустит `python -m src.bot`.
 
-- `tesseract-ocr`
-- `poppler-utils`
+> Если на Render нет Tesseract/Poppler, бот продолжает работать через OpenAI Vision fallback. Для сканированных PDF без текстового слоя рекомендуется настроить системные пакеты или отправлять фото вместо PDF.
 
-На Windows дополнительно может понадобиться добавить пути к Tesseract и Poppler в `PATH`.
+## Известные ограничения
 
-Если на Render системные OCR-пакеты недоступны или не настроены, бот всё равно может извлекать текст из изображений через OpenAI vision fallback. Для PDF без текстового слоя желательно подключить Poppler/Tesseract или отправлять более простые PDF/фото.
+- Формат `.doc` не поддерживается — только `.docx` или PDF.
+- Rate limit хранится в памяти: при перезапуске процесса счётчики сбрасываются.
+- Лимит Telegram на скачивание файлов — 20 МБ. `MAX_FILE_MB` не может быть выше этого значения.
 
-## Ограничения v1
+## Зависимости
 
-- `.doc` не поддерживается. Отправляйте `.docx` или PDF.
-- Rate limit хранится в памяти процесса. После перезапуска Render Worker счетчики сбрасываются.
+| Библиотека | Назначение |
+|---|---|
+| aiogram 3.x | Telegram Bot API |
+| openai | OpenAI Responses API (text + vision) |
+| pydantic-settings | Конфигурация через .env |
+| pypdf | Извлечение текстового слоя PDF |
+| python-docx | Чтение DOCX |
+| pytesseract + Pillow | Локальный OCR изображений |
+| pdf2image | Конвертация страниц PDF в PNG для OCR |
+| aiohttp-socks | SOCKS5 прокси для aiogram |

@@ -14,6 +14,7 @@ import pytesseract
 
 
 VisionOcr = Callable[[Path], Awaitable[str]]
+VisionAnswer = Callable[[list[Path]], Awaitable[str]]
 
 
 class ExtractionError(Exception):
@@ -91,6 +92,32 @@ def extract_docx_text(path: Path) -> str:
     return text
 
 
+async def answer_pdf_with_vision(
+    path: Path,
+    *,
+    max_pdf_pages: int,
+    vision_answer: VisionAnswer,
+) -> str:
+    """Convert PDF pages to images and send them all to GPT Vision for a direct answer."""
+    with TemporaryDirectory(prefix="pdf-vision-") as temp_dir:
+        pages = await asyncio.to_thread(
+            convert_from_path,
+            str(path),
+            first_page=1,
+            last_page=max_pdf_pages,
+            output_folder=temp_dir,
+            fmt="png",
+        )
+
+        page_paths: list[Path] = []
+        for index, image in enumerate(pages, start=1):
+            image_path = Path(temp_dir) / f"page-{index}.png"
+            image.save(image_path, "PNG")
+            page_paths.append(image_path)
+
+        return await vision_answer(page_paths)
+
+
 async def _ocr_pdf_pages(path: Path, *, max_pdf_pages: int, vision_ocr: VisionOcr) -> str:
     with TemporaryDirectory(prefix="pdf-pages-") as temp_dir:
         pages = await asyncio.to_thread(
@@ -149,7 +176,11 @@ def _has_enough_text(text: str) -> bool:
     return len(letters) >= 20
 
 
-def _is_image(suffix: str, mime_type: str | None) -> bool:
+def is_image_file(suffix: str, mime_type: str | None) -> bool:
     return suffix in {".jpg", ".jpeg", ".png", ".webp"} or (
         mime_type is not None and mime_type.startswith("image/")
     )
+
+
+def _is_image(suffix: str, mime_type: str | None) -> bool:
+    return is_image_file(suffix, mime_type)

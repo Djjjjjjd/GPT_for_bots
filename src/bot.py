@@ -14,7 +14,13 @@ from src.config import get_settings
 from src.file_loader import DownloadedFile, download_telegram_file
 from src.gpt_client import GptClient
 from src.rate_limit import InMemoryRateLimiter
-from src.text_extractors import ExtractionError, PdfTooLongError, extract_text
+from src.text_extractors import (
+    ExtractionError,
+    PdfTooLongError,
+    answer_pdf_with_vision,
+    extract_text,
+    is_image_file,
+)
 
 
 TELEGRAM_MESSAGE_LIMIT = 4096
@@ -70,7 +76,7 @@ async def handle_file(message: Message) -> None:
         await message.answer(limit_result.message or "Лимит запросов исчерпан.")
         return
 
-    status_message = await message.answer("Файл получен. Извлекаю текст...")
+    status_message = await message.answer("Файл получен. Обрабатываю...")
     downloaded_file: DownloadedFile | None = None
 
     try:
@@ -88,21 +94,42 @@ async def handle_file(message: Message) -> None:
             )
             return
 
-        extracted_text = await extract_text(
-            downloaded_file.path,
-            mime_type=downloaded_file.mime_type,
-            max_pdf_pages=settings.max_pdf_pages,
-            vision_ocr=gpt_client.extract_text_from_image,
-        )
+        path = downloaded_file.path
+        mime = downloaded_file.mime_type
 
-        if not extracted_text.strip():
-            await status_message.edit_text(
-                "Не удалось извлечь текст. Попробуйте отправить более четкий файл."
-            )
-            return
+        if is_image_file(path.suffix.lower(), mime):
+            await status_message.edit_text("Анализирую изображение...")
+            answer = await gpt_client.answer_task_with_image(path)
+        else:
+            await status_message.edit_text("Извлекаю текст...")
+            is_pdf = path.suffix.lower() == ".pdf" or mime == "application/pdf"
+            try:
+                extracted_text = await extract_text(
+                    path,
+                    mime_type=mime,
+                    max_pdf_pages=settings.max_pdf_pages,
+                    vision_ocr=gpt_client.extract_text_from_image,
+                )
+            except ExtractionError as exc:
+                if is_pdf and not isinstance(exc, PdfTooLongError):
+                    await status_message.edit_text("Сканированный PDF. Анализирую страницы...")
+                    answer = await answer_pdf_with_vision(
+                        path,
+                        max_pdf_pages=settings.max_pdf_pages,
+                        vision_answer=gpt_client.answer_task_with_images,
+                    )
+                else:
+                    raise
 
-        await status_message.edit_text("Текст распознан. Готовлю ответ...")
-        answer = await gpt_client.answer_task(extracted_text)
+            else:
+                if not extracted_text.strip():
+                    await status_message.edit_text(
+                        "Не удалось извлечь текст. Попробуйте отправить более четкий файл."
+                    )
+                    return
+                await status_message.edit_text("Текст распознан. Готовлю ответ...")
+                answer = await gpt_client.answer_task(extracted_text)
+
         await status_message.delete()
         await send_long_message(message, answer)
 
